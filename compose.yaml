@@ -1,0 +1,29 @@
+services:
+  server:
+    container_name: server
+    build:
+      dockerfile: ./Dockerfile
+      context: ./server
+    restart: unless-stopped
+    command: sh -c "uvicorn src.main:app --host 0.0.0 --port 8000"
+
+  reverse-proxy:
+    container_name: reverse-proxy
+    build:
+      dockerfile: ./Dockerfile
+      context: ./reverse-proxy
+    restart: unless-stopped
+    command: sh -c "uvicorn src.main:app --host 0.0.0 --port 9000"
+    environment:
+      - SERVER_URL=http://server:8000
+    ports:
+      - "9000:9000"
+  client:
+    container_name: client
+
+    build:
+      dockerfile: ./Dockerfile
+      context: ./client
+    restart: unless-stopped
+
+

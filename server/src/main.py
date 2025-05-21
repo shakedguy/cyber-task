@@ -1,20 +1,21 @@
 import logging
 import sys
+from collections import Counter
+from datetime import datetime
+from functools import cache
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, Depends
-from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-from .db import SessionLocal, GeolocationLog, User
-from datetime import datetime
-from collections import Counter
-from functools import cache
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from .auth import verify_password, hash_password, create_access_token
-from fastapi import HTTPException, status, Request
-from loguru import logger
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from loguru import logger
+from sqlalchemy.orm import Session
+
+from .auth import create_access_token, hash_password, verify_password
+from .conf import settings
+from .db import GeolocationLog, SessionLocal, User
 
 logger.add(sys.stderr, format="{time} {level} {message}", level=logging.INFO)
 logger.add("logs_{time}.log")
@@ -42,10 +43,10 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,  # type: ignore
     allow_origins=[
-        "http://localhost:8000",
+        f"http://{settings.host}:{settings.port}",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -75,7 +76,8 @@ def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ):
     from jose import JWTError, jwt
-    from .auth import SECRET_KEY, ALGORITHM
+
+    from .auth import ALGORITHM, SECRET_KEY
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -97,7 +99,9 @@ def get_current_user(
 
 @app.get("/geolocate")
 async def geolocate(
-    ip: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    ip: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     logger.info("Received request to geolocate IP: {ip}", ip=ip)
     country = get_country_from_ip(ip)
@@ -113,6 +117,7 @@ def ips_by_country(
     from_time: Optional[str] = None,
     to_time: Optional[str] = None,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     logger.info("Received request to get IPs by country: {country}", country=country)
     query = db.query(GeolocationLog).filter(GeolocationLog.country == country)
@@ -130,7 +135,10 @@ def ips_by_country(
 
 
 @app.get("/top-countries")
-def top_countries(db: Session = Depends(get_db)):
+def top_countries(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     logger.info("Received request to get top countries")
     logs = db.query(GeolocationLog).all()
     counter = Counter(log.country for log in logs)

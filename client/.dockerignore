@@ -48,3 +48,5 @@ docker/
 compose.yaml
 compose.*.yaml
 .ruff_cache/
+*.log
+*.db
