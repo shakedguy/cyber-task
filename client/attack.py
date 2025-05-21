@@ -28,14 +28,16 @@ def attack(
         data={"username": "admin", "password": "123456"},
     )
     if res.is_error:
-        typer.echo(res.text)
-        typer.Abort()
+        content = res.text
+        if "already registered" not in content:
+            typer.echo(content)
+            return typer.Abort()
     res = httpx.post(
         "http://localhost:9000/login", data={"username": "admin", "password": "123456"}
     )
     if res.is_error:
         typer.echo(res.text)
-        typer.Abort()
+        return typer.Abort()
 
     token = res.json()["access_token"]
     if _type == "syn":
