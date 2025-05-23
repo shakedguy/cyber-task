@@ -1,6 +1,5 @@
 import logging
 import sys
-from collections import Counter
 from datetime import datetime
 from functools import cache
 from typing import Optional
@@ -12,6 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from loguru import logger
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from .auth import create_access_token, hash_password, verify_password
 from .conf import settings
@@ -158,9 +158,22 @@ def top_countries(
     user: User = Depends(get_current_user),
 ):
     logger.info("Received request to get top countries")
-    logs = db.query(GeolocationLog).all()
-    counter = Counter(log.country for log in logs)
-    return counter.most_common(5)
+    result = (
+        db.query(
+            GeolocationLog.country, func.count(GeolocationLog.country).label("count")
+        )
+        .group_by(GeolocationLog.country)
+        .order_by(func.count(GeolocationLog.country).desc())
+        .limit(5)
+        .all()
+    )
+    result = (
+        [{"country": country, "count": count} for country, count in result]
+        if result
+        else []
+    )
+
+    return JSONResponse(result, status_code=status.HTTP_200_OK)
 
 
 @app.post("/register")
