@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 from .auth import create_access_token, hash_password, verify_password
 from .conf import settings
 from .db import GeolocationLog, SessionLocal, User
+from jose import JWTError, jwt
+
+from .auth import ALGORITHM, SECRET_KEY
 
 logger.add(sys.stderr, format="{time} {level} {message}", level=logging.INFO)
 logger.add("logs_{time}.log")
@@ -75,10 +78,6 @@ def get_db():
 def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ):
-    from jose import JWTError, jwt
-
-    from .auth import ALGORITHM, SECRET_KEY
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -103,9 +102,21 @@ async def geolocate(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if not ip:
+        logger.error("IP parameter is required")
+        return JSONResponse(
+            {"error": "IP parameter is required"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     logger.info("Received request to geolocate IP: {ip}", ip=ip)
     country = get_country_from_ip(ip)
-    log = GeolocationLog(ip=ip, country=country)
+    if not country:
+        logger.error("Failed to geolocate IP: {ip}", ip=ip)
+        return JSONResponse(
+            {"error": "Failed to geolocate IP"},
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    log = GeolocationLog(ip=ip, country=country.lower())
     db.add(log)
     db.commit()
     return {"ip": ip, "country": country}
@@ -119,6 +130,13 @@ def ips_by_country(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if not country:
+        return JSONResponse(
+            {"error": "Country parameter is required"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    country = country.lower()
     logger.info("Received request to get IPs by country: {country}", country=country)
     query = db.query(GeolocationLog).filter(GeolocationLog.country == country)
 
@@ -150,17 +168,31 @@ def register(
     form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
 ):
     if db.query(User).filter(User.username == form.username).first():
-        raise HTTPException(status_code=400, detail="Username already registered")
+        return JSONResponse(
+            {"error": "Username already registered"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     user = User(username=form.username, hashed_password=hash_password(form.password))
     db.add(user)
     db.commit()
-    return {"msg": "User created successfully"}
+    return JSONResponse(
+        {"msg": "User created successfully"}, status_code=status.HTTP_201_CREATED
+    )
 
 
 @app.post("/login")
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form.username).first()
     if not user or not verify_password(form.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Invalid credentials")
+        return JSONResponse(
+            {"error": "Invalid credentials"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     token = create_access_token(data={"sub": user.username})
-    return {"access_token": token, "token_type": "bearer"}
+    return JSONResponse(
+        {
+            "access_token": token,
+            "token_type": "bearer",
+        },
+        status_code=status.HTTP_200_OK,
+    )
